@@ -66,6 +66,11 @@ ENV TESSERACT_CONFIG="--oem 3 --psm 6 -c preserve_interword_spaces=1 -c textord_
 ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
 ENV OPENCV_VIDEOIO_PRIORITY_MSMF=0
+ENV PYTHONHASHSEED=0
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONFAULTHANDLER=1
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONOPTIMIZE=2
 
 # Verify Tesseract installation and configuration
 RUN tesseract --version && \
@@ -85,7 +90,10 @@ RUN pip install --no-cache-dir -r requirements.txt && \
     Pillow==10.0.0 \
     numpy==1.24.3 \
     opencv-python-headless==4.8.0.74 \
-    opencv-contrib-python-headless==4.8.0.74
+    opencv-contrib-python-headless==4.8.0.74 \
+    gunicorn==21.2.0 \
+    gevent==23.7.0 \
+    greenlet==3.0.1
 
 # Copy the rest of the application
 COPY . .
@@ -109,7 +117,7 @@ elif [ "$1" = "test-watch" ]; then\n\
     pytest-watch -v --cov=app --cov-report=term-missing tests/\n\
 else\n\
     echo "Starting application..."\n\
-    python app.py\n\
+    gunicorn --bind 0.0.0.0:5000 --workers 4 --threads 2 --worker-class gevent --timeout 120 app:app\n\
 fi' > /app/entrypoint.sh && \
     chmod +x /app/entrypoint.sh
 

@@ -293,6 +293,7 @@ def upload_file():
                 # First try to extract text directly from PDF
                 doc = fitz.open(filepath)
                 content = []
+                total_pages = len(doc)
                 
                 for page_num in range(len(doc)):
                     page = doc[page_num]
@@ -359,20 +360,25 @@ def upload_file():
                             elif cleaned_word.islower():
                                 cleaned_words.append(cleaned_word.upper())
                     
-                    # Remove duplicates while preserving order
+                    # Remove duplicates while preserving case variations
                     seen = set()
-                    cleaned_words = [x for x in cleaned_words if not (x in seen or seen.add(x))]
+                    cleaned_words = [x for x in cleaned_words if not (x.lower() in seen or seen.add(x.lower()))]
+                    
+                    # Sort words alphabetically (case-insensitive)
+                    cleaned_words.sort(key=str.lower)
                     
                     # Join words back with spaces
                     cleaned_text = ' '.join(cleaned_words)
                     
                     # Log all found words for debugging
-                    logger.info(f"All words found on page {page_num + 1}: {cleaned_words}")
+                    logger.info(f"All words found on page {page_num + 1} (sorted): {cleaned_words}")
                     
                     # Add page marker and cleaned text
-                    content.append(f"--- Page {page_num + 1} ---\n{cleaned_text}")
-                
-                doc.close()
+                    content.append({
+                        'page_num': page_num + 1,
+                        'text': cleaned_text,
+                        'words': cleaned_words
+                    })
                 
                 # Generate URL for the uploaded file
                 pdf_url = url_for('uploaded_file', filename=filename)
@@ -380,9 +386,16 @@ def upload_file():
                 logger.info("Successfully processed PDF")
                 
                 # Create response with template
-                response = make_response(render_template('index.html', content=content, pdf_url=pdf_url))
+                response = make_response(render_template('index.html', 
+                    content=content, 
+                    pdf_url=pdf_url,
+                    total_pages=total_pages))
                 # Set cookie with current PDF filename
                 response.set_cookie('current_pdf', filename)
+                
+                # Close the document after we're done with it
+                doc.close()
+                
                 return response
             
             except Exception as e:
