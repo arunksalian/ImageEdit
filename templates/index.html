@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Reader</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            padding: 20px;
+            background-color: #f8f9fa;
+        }
+        .container {
+            max-width: 1200px;
+            background-color: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        .pdf-content {
+            margin-top: 20px;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            white-space: pre-wrap;
+            position: relative;
+            user-select: text;
+        }
+        .content-section {
+            margin-top: 20px;
+        }
+        .download-link {
+            display: inline-block;
+            margin-top: 10px;
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+        }
+        .download-link:hover {
+            background-color: #0056b3;
+            color: white;
+        }
+        .text-line {
+            padding: 2px 0;
+            line-height: 1.5;
+        }
+        .word-container {
+            display: inline-flex;
+            align-items: center;
+            margin: 0 2px;
+            padding: 2px 4px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .word-container:hover {
+            background-color: #e9ecef;
+        }
+        .word-checkbox {
+            margin-right: 4px;
+            cursor: pointer;
+        }
+        .word-label {
+            cursor: pointer;
+            padding: 2px 4px;
+            border-radius: 3px;
+            transition: background-color 0.2s;
+        }
+        .word-checkbox:checked + .word-label {
+            background-color: #ffeb3b;
+        }
+        .word-checkbox:checked + .word-label.redacted {
+            background-color: #000;
+            color: #000;
+        }
+        .redaction-controls {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            display: none;
+        }
+        .redaction-controls.active {
+            display: block;
+        }
+        .selection-controls {
+            margin-bottom: 10px;
+            padding: 10px;
+            background-color: #e9ecef;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-center mb-4">PDF Reader</h1>
+        
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                {% for message in messages %}
+                    <div class="alert alert-warning">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <form method="post" enctype="multipart/form-data" class="mb-4">
+            <div class="mb-3">
+                <label for="file" class="form-label">Select PDF File</label>
+                <input type="file" class="form-control" id="file" name="file" accept=".pdf">
+            </div>
+            <button type="submit" class="btn btn-primary">Upload and Read</button>
+        </form>
+        
+        {% if pdf_url %}
+        <div class="content-section">
+            <h3>Uploaded PDF</h3>
+            <p>Your PDF has been processed successfully.</p>
+            <a href="{{ pdf_url }}" class="download-link" download>
+                <i class="fas fa-download"></i> Download PDF
+            </a>
+        </div>
+        {% endif %}
+        
+        {% if content %}
+        <div class="content-section">
+            <h3>Extracted Text</h3>
+            <div class="redaction-controls">
+                <div class="selection-controls">
+                    <button class="btn btn-outline-primary" id="selectAll">Select All</button>
+                    <button class="btn btn-outline-secondary" id="deselectAll">Deselect All</button>
+                    <button class="btn btn-outline-danger" id="clearRedactions">Clear All Redactions</button>
+                </div>
+                <div class="action-controls">
+                    <button class="btn btn-warning" id="redactSelected">Redact Selected Words</button>
+                    <button class="btn btn-success" id="downloadRedacted">Download Redacted PDF</button>
+                </div>
+            </div>
+            <div class="pdf-content" id="pdfContent">
+                {% for line in content %}
+                    <div class="text-line" data-line="{{ loop.index0 }}">
+                        {% for word in line.split() %}
+                            <div class="word-container">
+                                <input type="checkbox" class="word-checkbox" id="word-{{ loop.index0 }}-{{ loop.index }}" data-word="{{ word }}">
+                                <label class="word-label" for="word-{{ loop.index0 }}-{{ loop.index }}">{{ word }}</label>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://kit.fontawesome.com/your-font-awesome-kit.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const pdfContent = document.getElementById('pdfContent');
+            const redactionControls = document.querySelector('.redaction-controls');
+            const redactSelectedBtn = document.getElementById('redactSelected');
+            const clearRedactionsBtn = document.getElementById('clearRedactions');
+            const downloadRedactedBtn = document.getElementById('downloadRedacted');
+            const selectAllBtn = document.getElementById('selectAll');
+            const deselectAllBtn = document.getElementById('deselectAll');
+            
+            if (pdfContent) {
+                redactionControls.classList.add('active');
+                
+                // Select all words
+                selectAllBtn.addEventListener('click', function() {
+                    const checkboxes = document.querySelectorAll('.word-checkbox');
+                    checkboxes.forEach(checkbox => {
+                        checkbox.checked = true;
+                    });
+                });
+                
+                // Deselect all words
+                deselectAllBtn.addEventListener('click', function() {
+                    const checkboxes = document.querySelectorAll('.word-checkbox');
+                    checkboxes.forEach(checkbox => {
+                        checkbox.checked = false;
+                    });
+                });
+                
+                // Redact selected words
+                redactSelectedBtn.addEventListener('click', function() {
+                    const selectedWords = document.querySelectorAll('.word-checkbox:checked');
+                    selectedWords.forEach(checkbox => {
+                        const label = checkbox.nextElementSibling;
+                        label.classList.add('redacted');
+                    });
+                });
+                
+                // Clear all redactions
+                clearRedactionsBtn.addEventListener('click', function() {
+                    const redactedLabels = document.querySelectorAll('.word-label.redacted');
+                    redactedLabels.forEach(label => {
+                        label.classList.remove('redacted');
+                        label.previousElementSibling.checked = false;
+                    });
+                });
+                
+                // Download redacted PDF
+                downloadRedactedBtn.addEventListener('click', function() {
+                    const redactedWords = Array.from(document.querySelectorAll('.word-checkbox:checked'))
+                        .map(checkbox => ({
+                            text: checkbox.dataset.word,
+                            line: checkbox.closest('.text-line').dataset.line
+                        }));
+                    
+                    if (redactedWords.length === 0) {
+                        alert('Please select words to redact first.');
+                        return;
+                    }
+                    
+                    console.log('Sending redaction request for words:', redactedWords);
+                    
+                    fetch('/redact-pdf', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            redacted_words: redactedWords
+                        })
+                    })
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('Network response was not ok');
+                        }
+                        return response.blob();
+                    })
+                    .then(blob => {
+                        if (blob.size === 0) {
+                            throw new Error('Received empty PDF file');
+                        }
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.style.display = 'none';
+                        a.href = url;
+                        a.download = 'redacted_document.pdf';
+                        document.body.appendChild(a);
+                        a.click();
+                        window.URL.revokeObjectURL(url);
+                        a.remove();
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        alert('Error generating redacted PDF: ' + error.message);
+                    });
+                });
+            }
+        });
+    </script>
+</body>
+</html> 
