@@ -3,287 +3,177 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PDF Text Extractor</title>
+    <title>PDF Text Redactor</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body {
-            padding: 20px;
+            padding-top: 2rem;
             background-color: #f8f9fa;
         }
         .container {
-            max-width: 1200px;
-            background-color: white;
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            max-width: 800px;
         }
-        .pdf-content {
-            margin-top: 20px;
-            padding: 20px;
-            background-color: #f8f9fa;
-            border-radius: 5px;
-            white-space: pre-wrap;
-            position: relative;
-            user-select: text;
+        .card {
+            border: none;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 2rem;
         }
-        .content-section {
-            margin-top: 20px;
-        }
-        .download-link {
-            display: inline-block;
-            margin-top: 10px;
-            padding: 10px 20px;
+        .card-header {
             background-color: #007bff;
             color: white;
-            text-decoration: none;
-            border-radius: 5px;
-        }
-        .download-link:hover {
-            background-color: #0056b3;
-            color: white;
-        }
-        .text-line {
-            padding: 2px 0;
-            line-height: 1.5;
-        }
-        .word-container {
-            display: inline-block;
-            margin: 2px;
-            padding: 2px 5px;
-            border: 1px solid #ddd;
-            border-radius: 3px;
-            cursor: pointer;
-        }
-        .word-container:hover {
-            background-color: #f8f9fa;
-        }
-        .word-checkbox {
-            margin-right: 5px;
-        }
-        .word-label {
-            cursor: pointer;
-            padding: 2px 4px;
-            border-radius: 3px;
-            transition: background-color 0.2s;
-        }
-        .word-checkbox:checked + .word-label {
-            background-color: #ffeb3b;
-        }
-        .word-checkbox:checked + .word-label.redacted {
-            background-color: #000;
-            color: #000;
-        }
-        .redaction-controls {
-            margin: 10px 0;
-            padding: 10px;
-            background-color: #f8f9fa;
-            border-radius: 5px;
-            display: none;
-        }
-        .redaction-controls.active {
-            display: block;
-        }
-        .selection-controls {
-            margin-bottom: 10px;
-            padding: 10px;
-            background-color: #e9ecef;
-            border-radius: 5px;
-        }
-        .page-section {
-            margin-bottom: 30px;
-            padding: 15px;
-            border: 1px solid #dee2e6;
-            border-radius: 5px;
-            background-color: #fff;
-        }
-        .page-header {
-            background-color: #f8f9fa;
-            padding: 10px;
-            margin-bottom: 15px;
-            border-radius: 3px;
             font-weight: bold;
         }
-        .word-list {
-            columns: 4;
-            column-gap: 20px;
-            margin-bottom: 20px;
+        .btn-primary {
+            background-color: #007bff;
+            border-color: #007bff;
         }
-        @media (max-width: 992px) {
-            .word-list {
-                columns: 3;
-            }
+        .btn-primary:hover {
+            background-color: #0056b3;
+            border-color: #0056b3;
         }
-        @media (max-width: 768px) {
-            .word-list {
-                columns: 2;
-            }
+        #wordList {
+            margin-top: 1rem;
         }
-        @media (max-width: 576px) {
-            .word-list {
-                columns: 1;
-            }
+        .word-item {
+            display: inline-block;
+            background-color: #e9ecef;
+            padding: 0.25rem 0.5rem;
+            margin: 0.25rem;
+            border-radius: 0.25rem;
         }
-        .selected {
-            background-color: #fff3cd;
-        }
-        .redacted {
-            background-color: #000;
-            color: #fff;
-        }
-        #pdf-preview {
-            width: 100%;
-            height: 800px;
-            border: 1px solid #dee2e6;
-            margin-bottom: 20px;
-        }
-        .controls {
-            margin-bottom: 20px;
-            padding: 10px;
-            background-color: #f8f9fa;
-            border-radius: 5px;
+        .word-item button {
+            margin-left: 0.5rem;
+            border: none;
+            background: none;
+            color: #dc3545;
+            padding: 0;
+            font-size: 0.875rem;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1 class="text-center mb-4">PDF Text Extractor</h1>
+        <h1 class="text-center mb-4">PDF Text Redactor</h1>
         
-        {% with messages = get_flashed_messages() %}
-            {% if messages %}
-                {% for message in messages %}
-                    <div class="alert alert-warning">{{ message }}</div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
-        
-        <form method="post" enctype="multipart/form-data" class="mb-4">
-            <div class="mb-3">
-                <label for="file" class="form-label">Select PDF File</label>
-                <input type="file" class="form-control" id="file" name="file" accept=".pdf">
+        <div class="card">
+            <div class="card-header">
+                Upload PDF and Redact Text
             </div>
-            <button type="submit" class="btn btn-primary">Upload PDF</button>
-        </form>
-        
-        {% if pdf_url %}
-        <div class="row">
-            <!-- PDF Preview -->
-            <div class="col-md-6">
-                <h3>PDF Preview</h3>
-                <iframe id="pdf-preview" src="{{ pdf_url }}"></iframe>
-            </div>
-
-            <!-- Extracted Text -->
-            <div class="col-md-6">
-                <h3>Extracted Text</h3>
-                
-                <!-- Controls -->
-                <div class="controls">
-                    <button class="btn btn-secondary btn-sm" onclick="selectAll()">Select All</button>
-                    <button class="btn btn-secondary btn-sm" onclick="deselectAll()">Deselect All</button>
-                    <button class="btn btn-danger btn-sm" onclick="clearRedactions()">Clear All Redactions</button>
-                    <button class="btn btn-primary btn-sm" onclick="redactSelected()">Redact Selected Words</button>
-                </div>
-
-                <!-- Content -->
-                {% if content %}
-                    {% for page in content %}
-                    <div class="page-section">
-                        <div class="page-header">Page {{ page.page_num }} of {{ total_pages }}</div>
-                        <div class="word-list">
-                            {% for word in page.words %}
-                            <div class="word-container">
-                                <input type="checkbox" class="word-checkbox" data-word="{{ word }}" data-line="{{ page.page_num }}">
-                                <span>{{ word }}</span>
-                            </div>
-                            {% endfor %}
-                        </div>
+            <div class="card-body">
+                <form id="uploadForm" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label for="pdfFile" class="form-label">Select PDF File</label>
+                        <input type="file" class="form-control" id="pdfFile" name="file" accept=".pdf" required>
                     </div>
-                    {% endfor %}
-                {% endif %}
+                    <div class="mb-3">
+                        <label for="wordInput" class="form-label">Add Words to Redact</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="wordInput" placeholder="Enter a word">
+                            <button type="button" class="btn btn-primary" onclick="addWord()">Add</button>
+                        </div>
+                        <div id="wordList"></div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Upload and Redact</button>
+                </form>
             </div>
         </div>
-        {% endif %}
+
+        <div id="result" class="card d-none">
+            <div class="card-header">
+                Result
+            </div>
+            <div class="card-body">
+                <div id="resultMessage"></div>
+                <div id="downloadLink" class="mt-3"></div>
+            </div>
+        </div>
     </div>
-    
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        function selectAll() {
-            document.querySelectorAll('.word-checkbox').forEach(checkbox => {
-                checkbox.checked = true;
-                checkbox.parentElement.classList.add('selected');
-            });
+        let words = [];
+
+        function addWord() {
+            const wordInput = document.getElementById('wordInput');
+            const word = wordInput.value.trim();
+            
+            if (word && !words.includes(word)) {
+                words.push(word);
+                updateWordList();
+                wordInput.value = '';
+            }
         }
 
-        function deselectAll() {
-            document.querySelectorAll('.word-checkbox').forEach(checkbox => {
-                checkbox.checked = false;
-                checkbox.parentElement.classList.remove('selected');
-            });
+        function removeWord(word) {
+            words = words.filter(w => w !== word);
+            updateWordList();
         }
 
-        function clearRedactions() {
-            document.querySelectorAll('.word-container').forEach(container => {
-                container.classList.remove('redacted');
-            });
+        function updateWordList() {
+            const wordList = document.getElementById('wordList');
+            wordList.innerHTML = words.map(word => `
+                <span class="word-item">
+                    ${word}
+                    <button onclick="removeWord('${word}')">&times;</button>
+                </span>
+            `).join('');
         }
 
-        function redactSelected() {
-            const selectedWords = [];
-            document.querySelectorAll('.word-checkbox:checked').forEach(checkbox => {
-                selectedWords.push({
-                    text: checkbox.dataset.word,
-                    line: checkbox.dataset.line
-                });
-                checkbox.parentElement.classList.add('redacted');
-            });
-
-            if (selectedWords.length === 0) {
-                alert('Please select words to redact first');
+        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            if (words.length === 0) {
+                alert('Please add at least one word to redact');
                 return;
             }
 
-            fetch('/redact-pdf', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    redacted_words: selectedWords
-                })
-            })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error('Network response was not ok');
-                }
-                return response.blob();
-            })
-            .then(blob => {
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'redacted_document.pdf';
-                document.body.appendChild(a);
-                a.click();
-                window.URL.revokeObjectURL(url);
-                a.remove();
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('Error redacting PDF: ' + error.message);
-            });
-        }
+            const formData = new FormData();
+            const fileInput = document.getElementById('pdfFile');
+            
+            formData.append('file', fileInput.files[0]);
+            words.forEach(word => formData.append('words', word));
 
-        // Add click event listeners to checkboxes
-        document.addEventListener('DOMContentLoaded', function() {
-            document.querySelectorAll('.word-checkbox').forEach(checkbox => {
-                checkbox.addEventListener('change', function() {
-                    if (this.checked) {
-                        this.parentElement.classList.add('selected');
-                    } else {
-                        this.parentElement.classList.remove('selected');
-                    }
+            try {
+                const response = await fetch('/pdf/upload-and-redact', {
+                    method: 'POST',
+                    body: formData
                 });
-            });
+
+                const result = await response.json();
+                
+                const resultDiv = document.getElementById('result');
+                const resultMessage = document.getElementById('resultMessage');
+                const downloadLink = document.getElementById('downloadLink');
+                
+                resultDiv.classList.remove('d-none');
+                
+                if (response.ok) {
+                    resultMessage.innerHTML = '<div class="alert alert-success">PDF successfully redacted!</div>';
+                    downloadLink.innerHTML = `
+                        <a href="/pdf/download/${result.filename}" class="btn btn-primary">
+                            Download Redacted PDF
+                        </a>
+                    `;
+                } else {
+                    resultMessage.innerHTML = `
+                        <div class="alert alert-danger">
+                            Error: ${result.error || 'Failed to redact PDF'}
+                        </div>
+                    `;
+                    downloadLink.innerHTML = '';
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                const resultDiv = document.getElementById('result');
+                const resultMessage = document.getElementById('resultMessage');
+                
+                resultDiv.classList.remove('d-none');
+                resultMessage.innerHTML = `
+                    <div class="alert alert-danger">
+                        Error: Failed to process request
+                    </div>
+                `;
+            }
         });
     </script>
 </body>
