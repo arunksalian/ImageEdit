@@ -95,17 +95,15 @@ RUN pip install --no-cache-dir -r requirements.txt && \
     gevent==23.7.0 \
     greenlet==3.0.1
 
+# Create necessary directories with proper permissions
+RUN mkdir -p /app/uploads /app/logs /app/tests /app/temp /app/redacted /tmp/tesseract && \
+    chmod -R 777 /app/uploads /app/logs /app/tests /app/temp /app/redacted /tmp/tesseract
+
 # Copy the rest of the application
 COPY . .
 
-# Create necessary directories with proper permissions
-RUN mkdir -p /app/uploads /app/logs /app/tests && \
-    chown -R nobody:nogroup /app/uploads /app/logs /app/tests && \
-    chmod -R 777 /app/uploads /app/logs /app/tests
-
-# Create a non-root user
-RUN useradd -m -u 1000 appuser && \
-    chown -R appuser:appuser /app
+# Set permissions for copied files
+RUN chmod -R 777 /app
 
 # Create entrypoint script
 RUN echo '#!/bin/bash\n\
@@ -117,15 +115,18 @@ elif [ "$1" = "test-watch" ]; then\n\
     pytest-watch -v --cov=app --cov-report=term-missing tests/\n\
 else\n\
     echo "Starting application..."\n\
-    gunicorn --bind 0.0.0.0:5000 --workers 4 --threads 2 --worker-class gevent --timeout 120 app:app\n\
+    echo "Current directory: $(pwd)"\n\
+    echo "Directory contents:"\n\
+    ls -la\n\
+    echo "Python path:"\n\
+    python -c "import sys; print(sys.path)"\n\
+    echo "Starting Gunicorn..."\n\
+    gunicorn --bind 0.0.0.0:5000 --workers 1 --threads 2 --worker-class sync --timeout 120 --log-level debug --error-logfile /app/logs/gunicorn-error.log --access-logfile /app/logs/gunicorn-access.log --capture-output app:app\n\
 fi' > /app/entrypoint.sh && \
     chmod +x /app/entrypoint.sh
 
 # Expose port
 EXPOSE 5000
-
-# Switch to non-root user
-USER appuser
 
 # Set the entrypoint
 ENTRYPOINT ["/app/entrypoint.sh"]
