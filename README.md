@@ -201,4 +201,6 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Support
 
-For support, please create an issue in the repository. 
+For support, please create an issue in the repository.
+
+ docker run -p 5000:5000 -v "E:/AI/Python/ImageEdit/uploads:/app/uploads" -v "E:/AI/Python/ImageEdit/logs:/app/logs" image-edit
