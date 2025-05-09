@@ -25,21 +25,6 @@ RUN apt-get update && apt-get install -y \
     libcairo2-dev \
     libopencv-dev \
     python3-opencv \
-    libgstreamer1.0-dev \
-    libgstreamer-plugins-base1.0-dev \
-    libgstreamer-plugins-bad1.0-dev \
-    gstreamer1.0-plugins-base \
-    gstreamer1.0-plugins-good \
-    gstreamer1.0-plugins-bad \
-    gstreamer1.0-plugins-ugly \
-    gstreamer1.0-libav \
-    gstreamer1.0-tools \
-    gstreamer1.0-x \
-    gstreamer1.0-alsa \
-    gstreamer1.0-gl \
-    gstreamer1.0-gtk3 \
-    gstreamer1.0-qt5 \
-    gstreamer1.0-pulseaudio \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -62,14 +47,12 @@ ENV FLASK_ENV=production
 ENV FLASK_DEBUG=0
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONIOENCODING=utf-8
-ENV TESSERACT_CONFIG="--oem 3 --psm 6 -c preserve_interword_spaces=1 -c textord_heavy_nr=1 -c textord_min_linesize=2.5 -c textord_force_make_prop_words=1"
+ENV TESSERACT_CONFIG="--oem 3 --psm 6 -c preserve_interword_spaces=1 -c textord_heavy_nr=1"
 ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
-ENV OPENCV_VIDEOIO_PRIORITY_MSMF=0
 ENV PYTHONHASHSEED=0
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONFAULTHANDLER=1
-ENV PYTHONUNBUFFERED=1
 ENV PYTHONOPTIMIZE=2
 
 # Verify Tesseract installation and configuration
@@ -90,7 +73,6 @@ RUN pip install --no-cache-dir -r requirements.txt && \
     Pillow==10.0.0 \
     numpy==1.24.3 \
     opencv-python-headless==4.8.0.74 \
-    opencv-contrib-python-headless==4.8.0.74 \
     gunicorn==21.2.0 \
     gevent==23.7.0 \
     greenlet==3.0.1
@@ -121,7 +103,16 @@ else\n\
     echo "Python path:"\n\
     python -c "import sys; print(sys.path)"\n\
     echo "Starting Gunicorn..."\n\
-    gunicorn --bind 0.0.0.0:5000 --workers 1 --threads 2 --worker-class sync --timeout 120 --log-level debug --error-logfile /app/logs/gunicorn-error.log --access-logfile /app/logs/gunicorn-access.log --capture-output app:app\n\
+    gunicorn --bind 0.0.0.0:5000 \
+             --workers $(nproc) \
+             --threads 4 \
+             --worker-class gevent \
+             --timeout 120 \
+             --log-level info \
+             --error-logfile /app/logs/gunicorn-error.log \
+             --access-logfile /app/logs/gunicorn-access.log \
+             --capture-output \
+             app:app\n\
 fi' > /app/entrypoint.sh && \
     chmod +x /app/entrypoint.sh
 

@@ -273,206 +273,62 @@ def cleanup_temp_files():
         except Exception as e2:
             logger.error(f"Error recreating temp directory: {str(e2)}")
 
-def extract_text_with_ocr(image, config):
-    """Extract text using OCR with different preprocessing and caching"""
+@lru_cache(maxsize=50)
+def get_ocr_results(page_image_bytes, width, height, config):
+    """Cache OCR results for each page"""
     try:
-        # Ensure Tesseract temp directory exists and is writable
-        ensure_tesseract_temp_dir()
-        logger.debug("Tesseract temp directory verified")
-
-        # Convert image to bytes for caching
-        img_byte_arr = io.BytesIO()
-        image.save(img_byte_arr, format='PNG')
-        img_byte_arr = img_byte_arr.getvalue()
-        logger.debug("Image converted to bytes for caching")
-        
-        # Check cache first
-        with ocr_cache_lock:
-            if img_byte_arr in ocr_cache:
-                logger.debug("Using cached OCR result")
-                return ocr_cache[img_byte_arr]
-        
-        # Get preprocessed images
-        processed_images = preprocess_image(img_byte_arr)
-        logger.debug(f"Generated {len(processed_images)} preprocessed images")
-        
-        # Try OCR on each preprocessed image with different configurations
-        texts = []
-        configs = [
-            # Base configurations
-            config,
-            # Enhanced configurations for better word detection
-            config + " --oem 3 --psm 6 -c preserve_interword_spaces=1 -c textord_heavy_nr=1 -c textord_min_linesize=2.5 -c textord_force_make_prop_words=1",
-            config + " --oem 3 --psm 4 -c preserve_interword_spaces=1 -c textord_heavy_nr=1 -c textord_min_linesize=2.5 -c textord_force_make_prop_words=1",
-            config + " --oem 3 --psm 3 -c preserve_interword_spaces=1 -c textord_heavy_nr=1 -c textord_min_linesize=2.5 -c textord_force_make_prop_words=1",
-            # Configurations with different character sets
-            config + " --oem 3 --psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",
-            config + " --oem 3 --psm 4 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",
-            # Configurations with different dictionaries
-            config + " --oem 3 --psm 6 -c load_system_dawg=1 -c load_freq_dawg=1",
-            config + " --oem 3 --psm 4 -c load_system_dawg=1 -c load_freq_dawg=1",
-            # Configurations with different PSM modes
-            config + " --oem 3 --psm 1",  # Automatic page segmentation with OSD
-            config + " --oem 3 --psm 0",  # Orientation and script detection
-            # Combined best settings
-            config + " --oem 3 --psm 6 -c preserve_interword_spaces=1 -c textord_heavy_nr=1 -c textord_min_linesize=2.5 -c textord_force_make_prop_words=1 -c load_system_dawg=1 -c load_freq_dawg=1"
-        ]
-        
-        for img_idx, img in enumerate(processed_images):
-            logger.debug(f"Processing preprocessed image {img_idx + 1}")
-            for cfg_idx, cfg in enumerate(configs):
-                logger.debug(f"Trying OCR configuration {cfg_idx + 1}")
-                try:
-                    # Create a temporary file for the image
-                    temp_file = None
-                    try:
-                        # Ensure temp directory exists before creating file
-                        ensure_tesseract_temp_dir()
-                        
-                        temp_file = tempfile.NamedTemporaryFile(suffix='.png', dir=TESSERACT_TEMP_DIR, delete=False)
-                        img.save(temp_file.name)
-                        temp_file.close()
-                        logger.debug(f"Created temporary file: {temp_file.name}")
-                        
-                        # Get both text and word boxes
-                        text = pytesseract.image_to_string(temp_file.name, config=cfg)
-                        if text.strip():
-                            logger.debug(f"Found text with config {cfg_idx + 1}: {text[:100]}...")
-                            texts.append(text)
-                            
-                            # Also get word boxes for better word detection
-                            data = pytesseract.image_to_data(temp_file.name, output_type=pytesseract.Output.DICT, config=cfg)
-                            words = []
-                            for i, word in enumerate(data['text']):
-                                if word.strip():
-                                    words.append(word.strip())
-                            if words:
-                                logger.debug(f"Found words with config {cfg_idx + 1}: {', '.join(words)}")
-                                texts.append(' '.join(words))
-                        
-                    finally:
-                        # Clean up the temporary file
-                        if temp_file and os.path.exists(temp_file.name):
-                            try:
-                                os.unlink(temp_file.name)
-                                logger.debug(f"Cleaned up temporary file: {temp_file.name}")
-                            except Exception as e:
-                                logger.warning(f"Error deleting temporary file {temp_file.name}: {str(e)}")
-                        
-                except Exception as e:
-                    logger.error(f"OCR error with config {cfg_idx + 1}: {str(e)}")
-                    continue
-        
-        # Combine all texts and clean up
-        result = " ".join(texts)
-        
-        # Clean up the text
-        result = ' '.join(result.split())  # Remove extra whitespace
-        result = result.replace('\n', ' ')  # Replace newlines with spaces
-        
-        logger.debug(f"Final OCR result: {result[:100]}...")
-        
-        # Cache the result
-        with ocr_cache_lock:
-            ocr_cache[img_byte_arr] = result
-        
-        return result
-        
+        # Convert bytes to PIL Image with correct dimensions
+        img = Image.frombytes("RGB", [width, height], page_image_bytes)
+        return pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT, config=config)
     except Exception as e:
-        logger.error(f"Error in extract_text_with_ocr: {str(e)}")
-        logger.exception("Full traceback:")  # Add full traceback
-        return ""
+        logger.error(f"Error in get_ocr_results: {str(e)}")
+        return {'text': [], 'left': [], 'top': [], 'width': [], 'height': [], 'conf': []}
 
 def process_page(page, page_num, redact_words=None):
     """Process a single page in parallel"""
     try:
         logger.info(f"Processing page {page_num + 1}")
         
-        # If redaction is requested, process the page
         if redact_words:
             logger.info(f"Processing redaction for words: {redact_words}")
             
-            # Convert page to image for OCR with higher resolution
-            pix = page.get_pixmap(matrix=fitz.Matrix(8, 8))  # Increased resolution for better OCR
-            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            # Convert page to image for OCR with optimal resolution
+            pix = page.get_pixmap(matrix=fitz.Matrix(4, 4))  # Reduced resolution for better performance
+            img_bytes = pix.samples
             
-            # Get word boxes from OCR with multiple configurations
+            # Optimized OCR configurations
             configs = [
-                # Standard configurations
-                r'--oem 3 --psm 6 -c preserve_interword_spaces=1 -c textord_heavy_nr=1 -c textord_min_linesize=2.5 -c textord_force_make_prop_words=1',
-                r'--oem 3 --psm 4 -c preserve_interword_spaces=1 -c textord_heavy_nr=1 -c textord_min_linesize=2.5 -c textord_force_make_prop_words=1',
-                r'--oem 3 --psm 3 -c preserve_interword_spaces=1 -c textord_heavy_nr=1 -c textord_min_linesize=2.5 -c textord_force_make_prop_words=1',
-                # Configurations with different character sets
-                r'--oem 3 --psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789',
-                r'--oem 3 --psm 4 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789',
-                # Configurations with different dictionaries
-                r'--oem 3 --psm 6 -c load_system_dawg=1 -c load_freq_dawg=1',
-                r'--oem 3 --psm 4 -c load_system_dawg=1 -c load_freq_dawg=1',
-                # Configurations with different PSM modes
-                r'--oem 3 --psm 1',  # Automatic page segmentation with OSD
-                r'--oem 3 --psm 0',  # Orientation and script detection
-                # Combined best settings
-                r'--oem 3 --psm 6 -c preserve_interword_spaces=1 -c textord_heavy_nr=1 -c textord_min_linesize=2.5 -c textord_force_make_prop_words=1 -c load_system_dawg=1 -c load_freq_dawg=1'
+                # Primary configuration with best balance
+                r'--oem 3 --psm 6 -c preserve_interword_spaces=1 -c textord_heavy_nr=1',
+                # Fallback configuration for difficult cases
+                r'--oem 3 --psm 4 -c preserve_interword_spaces=1 -c load_system_dawg=1'
             ]
             
-            # Process each word to redact
+            found_rects = []
             for word_to_redact in redact_words:
                 logger.debug(f"Looking for word to redact: {word_to_redact}")
-                found_rects = []
                 
-                # Try each OCR configuration
-                for config in configs:
-                    try:
-                        data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT, config=config)
-                        
-                        # Search for the word in OCR results
-                        for i, text in enumerate(data['text']):
-                            if text.strip():
-                                # Try multiple matching strategies
-                                text_lower = text.lower()
-                                word_lower = word_to_redact.lower()
-                                
-                                if (word_lower in text_lower or  # Partial match
-                                    text_lower == word_lower or  # Exact match
-                                    word_to_redact.upper() in text.upper() or  # Uppercase match
-                                    word_to_redact in text):  # Direct match
-                                    
-                                    x = data['left'][i]
-                                    y = data['top'][i]
-                                    w = data['width'][i]
-                                    h = data['height'][i]
-                                    conf = data['conf'][i]
-                                    
-                                    # Only process if confidence is above threshold
-                                    if conf > 30:  # Adjust confidence threshold as needed
-                                        # Scale coordinates back to original size
-                                        rect = fitz.Rect(x/8, y/8, (x+w)/8, (y+h)/8)
-                                        # Add padding to the rectangle
-                                        padding = 4  # Increased padding
-                                        rect.x0 -= padding
-                                        rect.y0 -= padding
-                                        rect.x1 += padding
-                                        rect.y1 += padding
-                                        found_rects.append(rect)
-                                        logger.debug(f"Found word '{word_to_redact}' at coordinates: {rect} with confidence: {conf}")
-                    except Exception as e:
-                        logger.error(f"Error in OCR config {config}: {str(e)}")
-                        continue
-                
-                # Also try direct text search with PyMuPDF
+                # Try direct text search first (faster)
                 try:
                     # Try different search variations
                     search_terms = [
                         word_to_redact,
-                        word_to_redact.upper(),
                         word_to_redact.lower(),
-                        word_to_redact.capitalize()
+                        word_to_redact.upper(),
+                        word_to_redact.capitalize(),
+                        # Add common variations
+                        word_to_redact.replace(' ', ''),
+                        word_to_redact.replace('-', ''),
+                        word_to_redact.replace('_', '')
                     ]
                     
                     for term in search_terms:
-                        word_instances = page.search_for(term, case_sensitive=False)
+                        # Try both case-sensitive and case-insensitive search
+                        word_instances = page.search_for(term, case_sensitive=True)
+                        word_instances.extend(page.search_for(term, case_sensitive=False))
+                        
                         for rect in word_instances:
-                            # Add padding to the rectangle
+                            # Add more padding for better coverage
                             padding = 4  # Increased padding
                             rect.x0 -= padding
                             rect.y0 -= padding
@@ -483,63 +339,106 @@ def process_page(page, page_num, redact_words=None):
                 except Exception as e:
                     logger.error(f"Error in direct text search: {str(e)}")
                 
-                # Create redaction annotations for all found instances
-                for rect in found_rects:
+                # Use OCR as a fallback
+                for config in configs:
                     try:
-                        # Create a slightly larger rectangle for better coverage
-                        expanded_rect = fitz.Rect(
-                            rect.x0 - 1,
-                            rect.y0 - 1,
-                            rect.x1 + 1,
-                            rect.y1 + 1
-                        )
+                        # Use cached OCR results with correct dimensions
+                        data = get_ocr_results(img_bytes, pix.width, pix.height, config)
                         
-                        # Create redaction annotation
-                        annot = page.add_redact_annot(expanded_rect)
-                        
-                        # Set the redaction appearance using the correct method
-                        annot.set_info(title="Redaction", content="Redacted text")
-                        annot.set_border(width=1)
-                        annot.set_colors(stroke=(0, 0, 0), fill=(0, 0, 0))
-                        annot.update()
-                        
-                        # Draw a black rectangle to ensure complete coverage
-                        page.draw_rect(expanded_rect, color=(0, 0, 0), fill=(0, 0, 0))
-                        
-                        logger.debug(f"Added black redaction for word '{word_to_redact}' at {expanded_rect}")
+                        for i, text in enumerate(data['text']):
+                            if text.strip() and data['conf'][i] > 40:  # Increased confidence threshold
+                                text_lower = text.lower()
+                                word_lower = word_to_redact.lower()
+                                
+                                # Try different matching strategies
+                                if (word_lower in text_lower or  # Partial match
+                                    text_lower == word_lower or  # Exact match
+                                    word_to_redact.upper() in text.upper() or  # Uppercase match
+                                    word_to_redact in text):  # Direct match
+                                    
+                                    x = data['left'][i]
+                                    y = data['top'][i]
+                                    w = data['width'][i]
+                                    h = data['height'][i]
+                                    
+                                    # Scale coordinates back to original size
+                                    rect = fitz.Rect(x/4, y/4, (x+w)/4, (y+h)/4)
+                                    padding = 4  # Increased padding
+                                    rect.x0 -= padding
+                                    rect.y0 -= padding
+                                    rect.x1 += padding
+                                    rect.y1 += padding
+                                    found_rects.append(rect)
+                                    logger.debug(f"Found word '{word_to_redact}' at coordinates: {rect}")
                     except Exception as e:
-                        logger.error(f"Error creating redaction annotation: {str(e)}")
+                        logger.error(f"Error in OCR config {config}: {str(e)}")
                         continue
             
-            # Apply redactions
+            # Merge overlapping rectangles
+            merged_rects = []
+            for rect in found_rects:
+                merged = False
+                for i, existing in enumerate(merged_rects):
+                    if rect.intersects(existing):
+                        # Merge rectangles
+                        merged_rects[i] = fitz.Rect(
+                            min(rect.x0, existing.x0),
+                            min(rect.y0, existing.y0),
+                            max(rect.x1, existing.x1),
+                            max(rect.y1, existing.y1)
+                        )
+                        merged = True
+                        break
+                if not merged:
+                    merged_rects.append(rect)
+            
+            # Create redaction annotations efficiently
+            for rect in merged_rects:
+                try:
+                    # Create a slightly larger rectangle for better coverage
+                    expanded_rect = fitz.Rect(
+                        rect.x0 - 2,
+                        rect.y0 - 2,
+                        rect.x1 + 2,
+                        rect.y1 + 2
+                    )
+                    
+                    # Create redaction annotation
+                    annot = page.add_redact_annot(expanded_rect)
+                    annot.set_info(title="Redaction")
+                    annot.set_colors(stroke=(0, 0, 0), fill=(0, 0, 0))
+                    annot.update()
+                    
+                    # Draw multiple black rectangles to ensure complete coverage
+                    page.draw_rect(expanded_rect, color=(0, 0, 0), fill=(0, 0, 0))
+                    # Draw slightly larger rectangle
+                    page.draw_rect(
+                        fitz.Rect(
+                            expanded_rect.x0 - 1,
+                            expanded_rect.y0 - 1,
+                            expanded_rect.x1 + 1,
+                            expanded_rect.y1 + 1
+                        ),
+                        color=(0, 0, 0),
+                        fill=(0, 0, 0)
+                    )
+                    
+                    logger.debug(f"Added redaction for word at {expanded_rect}")
+                except Exception as e:
+                    logger.error(f"Error creating redaction annotation: {str(e)}")
+                    continue
+            
+            # Apply redactions in a single pass
             try:
-                # First apply the redactions
                 page.apply_redactions()
-                
-                # Then draw black rectangles over the redacted areas to ensure complete coverage
-                for rect in found_rects:
-                    page.draw_rect(rect, color=(0, 0, 0), fill=(0, 0, 0))
-                
                 logger.info(f"Successfully applied redactions on page {page_num + 1}")
             except Exception as e:
                 logger.error(f"Error applying redactions on page {page_num + 1}: {str(e)}")
         
-        # Extract text for response
+        # Extract text efficiently
         text = page.get_text()
-        words = text.split()
-        cleaned_words = []
-        for word in words:
-            # Remove special characters but keep letters, numbers, and common symbols
-            cleaned_word = ''.join(c for c in word if c.isalnum() or c in '-_')
-            if cleaned_word:  # Only add non-empty words
-                cleaned_words.append(cleaned_word)
-        
-        # Remove duplicates while preserving case variations
-        seen = set()
-        cleaned_words = [x for x in cleaned_words if not (x.lower() in seen or seen.add(x.lower()))]
-        
-        # Sort words alphabetically (case-insensitive)
-        cleaned_words.sort(key=str.lower)
+        words = set(text.split())  # Use set for faster duplicate removal
+        cleaned_words = sorted({word for word in words if any(c.isalnum() for c in word)}, key=str.lower)
         
         return {
             'page_num': page_num + 1,
@@ -548,7 +447,6 @@ def process_page(page, page_num, redact_words=None):
         }
     except Exception as e:
         logger.error(f"Error processing page {page_num + 1}: {str(e)}")
-        logger.exception("Full traceback:")
         return None
 
 @app.route('/uploads/<filename>')
@@ -726,6 +624,13 @@ class PDFDownload(Resource):
             logger.error(f"Error downloading file {filename}: {str(e)}")
             return {'error': str(e)}, 500
 
+def process_pages_parallel(doc, words):
+    """Process multiple pages in parallel"""
+    with ThreadPoolExecutor(max_workers=min(os.cpu_count(), len(doc))) as executor:
+        futures = [executor.submit(process_page, doc[page_num], page_num, words) 
+                  for page_num in range(len(doc))]
+        return [future.result() for future in as_completed(futures)]
+
 @ns.route('/upload-and-redact')
 class PDFUploadAndRedact(Resource):
     @ns.expect(upload_parser)
@@ -738,7 +643,6 @@ class PDFUploadAndRedact(Resource):
     def post(self):
         """Upload a PDF file and redact specified words in a single operation"""
         try:
-            # Get file from request.files instead of parser
             if 'file' not in request.files:
                 return {'error': 'No file part'}, 400
             
@@ -746,30 +650,23 @@ class PDFUploadAndRedact(Resource):
             if file.filename == '':
                 return {'error': 'No selected file'}, 400
             
-            # Get words from form data
             words = request.form.getlist('words')
             if not words:
                 return {'error': 'No words specified for redaction'}, 400
             
             if file and allowed_file(file.filename):
-                # Generate unique filename
                 filename = generate_unique_filename(file.filename)
                 filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
                 
-                # Save the file
                 file.save(filepath)
                 logger.info(f"Saved file to: {filepath}")
                 
                 try:
-                    # Open the PDF with PyMuPDF
                     doc = fitz.open(filepath)
                     logger.info(f"PDF opened successfully. Number of pages: {len(doc)}")
                     
-                    # Process each page
-                    for page_num in range(len(doc)):
-                        page = doc[page_num]
-                        logger.info(f"Processing page {page_num + 1}")
-                        process_page(page, page_num, words)
+                    # Process pages in parallel
+                    results = process_pages_parallel(doc, words)
                     
                     # Generate unique filename for redacted file
                     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -779,7 +676,7 @@ class PDFUploadAndRedact(Resource):
                     
                     logger.info(f"Saving redacted PDF to: {redacted_path}")
                     
-                    # Save the redacted PDF with optimized settings
+                    # Save with optimized settings
                     doc.save(redacted_path, 
                             garbage=4,
                             deflate=True,
